@@ -7,41 +7,79 @@ import (
 	"net/http"
 )
 
-// GetKodikPage sends a GET request to the specified URL using the provided HTTP client,
-// sets the necessary headers, and returns the response body as a string.
-// If an error occurs during the request creation, execution, or response reading,
-// it prints the error and returns an empty string.
-//
-// Parameters:
-//   - client: *http.Client - The HTTP client to use for sending the request.
-//   - url: string - The URL to send the GET request to.
-//
-// Returns:
-//   - string: The response body as a string, or an empty string if an error occurs.
-func GetKodikPage(client *http.Client, url string) string {
+var (
+	KodikPage = NewKodikPageType()
+)
+
+type kodikPageType struct {
+	MAIN_PAGE         int
+	PLAYER_PAGE       int
+	SERIAL_PAGE       int
+	APP_SERIAL_SCRIPT int
+	APP_PLAYER_SCRIPT int
+}
+
+func NewKodikPageType() kodikPageType {
+	return kodikPageType{
+		MAIN_PAGE:         0,
+		PLAYER_PAGE:       1,
+		SERIAL_PAGE:       2,
+		APP_SERIAL_SCRIPT: 3, // Если это актуально, добавьте значения для остальных страниц
+		APP_PLAYER_SCRIPT: 4,
+	}
+}
+
+func GetPage(client *http.Client, url string, pageType int, params *KodikParams, forceRef string) (string, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return ""
+		return "", fmt.Errorf("error creating request: %w", err)
 	}
 
-	Set_headers("", "kodik.online", false, req)
+	// Установка заголовков в зависимости от типа страницы
+	if err := setHeadersBasedOnPageType(pageType, req, params, forceRef); err != nil {
+		return "", err
+	}
 
+	// Выполняем запрос
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error making request:", err)
-		return ""
+		return "", fmt.Errorf("error making request: %w", err)
 	}
-
 	defer resp.Body.Close()
 
+	// Обработка ответа
+	body, err := processResponseBody(resp)
+	if err != nil {
+		return "", err
+	}
+
+	return body, nil
+}
+
+func setHeadersBasedOnPageType(pageType int, req *http.Request, params *KodikParams, forceRef string) error {
+	switch pageType {
+	case KodikPage.MAIN_PAGE:
+		SetHeaders("", "", req, KodikPage.MAIN_PAGE)
+	case KodikPage.PLAYER_PAGE:
+		SetHeaders("https://"+params.MainDomain.Domain+"/", "", req, KodikPage.PLAYER_PAGE)
+	case KodikPage.APP_SERIAL_SCRIPT:
+		SetHeaders(forceRef, "", req, KodikPage.APP_SERIAL_SCRIPT)
+	default:
+		return fmt.Errorf("unknown page type: %d", pageType)
+	}
+	return nil
+}
+
+func processResponseBody(resp *http.Response) (string, error) {
 	var reader io.ReadCloser
+	var err error
+
+	// Обрабатываем сжато или не сжато содержимое
 	switch resp.Header.Get("Content-Encoding") {
 	case "gzip":
 		reader, err = gzip.NewReader(resp.Body)
 		if err != nil {
-			fmt.Println("Error creating gzip reader:", err)
-			return ""
+			return "", fmt.Errorf("error creating gzip reader: %w", err)
 		}
 		defer reader.Close()
 	default:
@@ -50,28 +88,8 @@ func GetKodikPage(client *http.Client, url string) string {
 
 	body, err := io.ReadAll(reader)
 	if err != nil {
-		fmt.Println("Error while reading response body:", err)
-		return ""
+		return "", fmt.Errorf("error while reading response body: %w", err)
 	}
 
-	return string(body)
+	return string(body), nil
 }
-
-// set_headers sets the necessary HTTP headers for a request.
-//
-// Parameters:
-//   - referer: The referer URL to be set in the "Referer" header if referer_required is true.
-//   - host: The host to be set in the "Host" header.
-//   - referer_required: A boolean indicating whether the "Referer" header should be set.
-//   - req: A pointer to the http.Request object where the headers will be set.
-//
-// The function sets the following headers:
-//   - Host
-//   - Connection
-//   - Cache-Control
-//   - Upgrade-Insecure-Requests
-//   - User-Agent
-//   - Accept
-//   - Accept-Encoding
-//   - Accept-Language
-//   - Referer (conditionally based on referer_required)
