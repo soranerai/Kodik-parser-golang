@@ -2,87 +2,176 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"regexp"
+	"strings"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
-// ` = alt + 96
-
-type kodik_param struct {
-	Domain      string
-	Domain_sign string
+// Структуры данных для параметров и видеоинформации
+type KodikParam struct {
+	Domain     string
+	DomainSign string
 }
 
-type kodik_params struct {
-	main_domain    kodik_param
-	player_domain  kodik_param
-	referer_domain kodik_param
+type KodikParams struct {
+	MainDomain    KodikParam
+	PlayerDomain  KodikParam
+	RefererDomain KodikParam
 }
 
-type kodik_serial_details struct {
-	serialId         string
-	serialHash       string
-	playerDomain     string
-	translationId    string
-	translationTitle string
-	cdnCheckLink     string
+type KodikSerialDetails struct {
+	SerialID         string
+	SerialHash       string
+	PlayerDomain     string
+	TranslationID    string
+	TranslationTitle string
 }
 
-func Parse_url_parameters(body string) kodik_params {
-	params := kodik_params{}
+type KodikSeriaInfo struct {
+	sNum   string
+	sId    string
+	sHash  string
+	sTitle string
+}
 
-	r, _ := regexp.Compile(`\{[^{}]*\}`)
-	params_json_string := r.FindString(body)
+type KodikSeasonInfo struct {
+	Series []KodikSeriaInfo
+}
 
-	if params_json_string == "" {
-		panic("Error while parsing params from player page (regex gives empty string)")
-	}
+// извлекает информацию о сериях из тела страницы плеера
+func ParseSeasonSeries(body string) (KodikSeasonInfo, error) {
+	var seasonInfo KodikSeasonInfo
 
-	var params_map map[string]interface{}
-	err := json.Unmarshal([]byte(params_json_string), &params_map)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
-		panic("Error while parsing params from player page (string to map failure)")
+		return seasonInfo, err
 	}
 
-	params.main_domain.Domain, _ = params_map["d"].(string)
-	params.main_domain.Domain_sign, _ = params_map["d_sign"].(string)
-	params.player_domain.Domain, _ = params_map["pd"].(string)
-	params.player_domain.Domain_sign, _ = params_map["pd_sign"].(string)
-	params.referer_domain.Domain, _ = params_map["ref"].(string)
-	params.referer_domain.Domain_sign, _ = params_map["ref_sign"].(string)
+	var seriaInfo KodikSeriaInfo
+	doc.Find(".serial-series-box select option").Each(
+		func(i int, s *goquery.Selection) {
+			seriaInfo = KodikSeriaInfo{}
 
-	return params
+			seriaInfo.sNum, _ = s.Attr("value")
+			seriaInfo.sId, _ = s.Attr("data-id")
+			seriaInfo.sHash, _ = s.Attr("data-hash")
+			seriaInfo.sTitle, _ = s.Attr("data-title")
+
+			seasonInfo.Series = append(seasonInfo.Series, seriaInfo)
+		})
+
+	return seasonInfo, nil
 }
 
-// Parse_serial_details extracts serial details from the provided HTML body string.
-// It uses regular expressions to find and parse specific variables within the HTML body.
-// If any of the required details are not found, the function will panic.
-//
-// Parameters:
-//   - body: A string containing the HTML body from which to parse the serial details.
-//
-// Returns:
-//   - kodik_serial_details: A struct containing the parsed serial details.
-//
-// Panics:
-//   - If any of the required details (serialId, serialHash, playerDomain, translationId, translationTitle)
-//     are not found in the provided HTML body, the function will panic with an appropriate error message.
-func Parse_serial_details(body string) kodik_serial_details {
-	details := kodik_serial_details{}
+// ParseURLParameters парсит параметры из строки body в структуру KodikParams
+func ParseURLParameters(body string, params *KodikParams) error {
+	r := regexp.MustCompile(`\{[^{}]*\}`)
+	paramsJSON := r.FindString(body)
+	if paramsJSON == "" {
+		return errors.New("failed to parse params: regex returned empty string")
+	}
 
-	details.serialId = extractDetail(body, `var serialId = Number\((\d+)\)`, "(serialId)")
-	details.serialHash = extractDetail(body, `var serialHash \= \"([0-9a-z]+)\"`, "(serialHash)")
-	details.playerDomain = extractDetail(body, `var playerDomain \= \"([a-z\.]+)\"`, "(playerDomain)")
-	details.translationId = extractDetail(body, `var translationId \= (\d+)`, "(translationId)")
-	details.translationTitle = extractDetail(body, `var translationTitle \= \"([a-zA-Zа-яА-Я0-9 \.]+)\"`, "(translationTitle)")
+	var paramsMap map[string]interface{}
+	if err := json.Unmarshal([]byte(paramsJSON), &paramsMap); err != nil {
+		return errors.New("failed to unmarshal params JSON: " + err.Error())
+	}
 
-	return details
+	params.MainDomain.Domain = getStringValue(paramsMap, "d")
+	params.MainDomain.DomainSign = getStringValue(paramsMap, "d_sign")
+	params.PlayerDomain.Domain = getStringValue(paramsMap, "pd")
+	params.PlayerDomain.DomainSign = getStringValue(paramsMap, "pd_sign")
+	params.RefererDomain.Domain = getStringValue(paramsMap, "ref")
+	params.RefererDomain.DomainSign = getStringValue(paramsMap, "ref_sign")
+
+	return nil
 }
 
-func extractDetail(body, pattern, detailName string) string {
+// ParseSerialDetails извлекает детали сериала из строки body
+func ParseSerialDetails(body string) (KodikSerialDetails, error) {
+	var details KodikSerialDetails
+
+	var err error
+	details.SerialID, err = extractRegex(body, `var serialId = Number\((\d+)\)`, "SerialID")
+	if err != nil {
+		return details, err
+	}
+
+	details.SerialHash, err = extractRegex(body, `var serialHash = "([0-9a-z]+)"`, "SerialHash")
+	if err != nil {
+		return details, err
+	}
+
+	details.PlayerDomain, err = extractRegex(body, `var playerDomain = "([a-z.]+)"`, "PlayerDomain")
+	if err != nil {
+		return details, err
+	}
+
+	details.TranslationID, err = extractRegex(body, `var translationId = (\d+)`, "TranslationID")
+	if err != nil {
+		return details, err
+	}
+
+	details.TranslationTitle, err = extractRegex(body, `var translationTitle = "([^"]+)"`, "TranslationTitle")
+	if err != nil {
+		return details, err
+	}
+
+	return details, nil
+}
+
+// extractRegex извлекает первую группу по заданной регулярке
+func extractRegex(body, pattern, fieldName string) (string, error) {
 	r := regexp.MustCompile(pattern)
 	match := r.FindStringSubmatch(body)
 	if len(match) > 1 {
-		return match[1]
+		return match[1], nil
 	}
-	panic("Error while parsing details from player page " + detailName)
+	return "", errors.New("failed to extract " + fieldName + " using regex")
+}
+
+// getStringValue безопасно извлекает строковое значение из карты
+func getStringValue(data map[string]interface{}, key string) string {
+	if val, ok := data[key].(string); ok {
+		return val
+	}
+	return ""
+}
+
+// ParseIframeURL извлекает URL iframe из строки body
+func ParseIframeURL(body string) (string, error) {
+	url, err := extractRegex(body, `iframe src="([^"]+)"`, "IframeURL")
+	if err != nil {
+		return "", err
+	}
+	return "https:" + url, nil
+}
+
+// ParseDomainFromURL извлекает домен из URL
+func ParseDomainFromURL(url string) (string, error) {
+	r := regexp.MustCompile(`https?://([^/]+)`)
+	match := r.FindStringSubmatch(url)
+	if len(match) > 1 {
+		return match[1], nil
+	}
+	return "", errors.New("failed to parse domain from URL")
+}
+
+// GetSerialScriptURL возвращает полный URL для скрипта сериала
+func GetSerialScriptURL(body, playerDomain string) (string, error) {
+	path, err := extractRegex(body, `<script .+ src="(.+)"></script>`, "ScriptPath")
+	if err != nil {
+		return "", err
+	}
+	return "https://" + playerDomain + path, nil
+}
+
+// GetSecretMethod извлекает и декодирует секретный метод
+func GetSecretMethod(body string) (string, error) {
+	encoded, err := extractRegex(body, `atob\("([^"]+)"\)`, "SecretMethod")
+	if err != nil {
+		return "", err
+	}
+	return DecodeBase64(encoded)
 }
