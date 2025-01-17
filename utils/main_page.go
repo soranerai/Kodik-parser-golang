@@ -17,6 +17,17 @@ type kodikPageType struct {
 	SERIAL_PAGE       int
 	APP_SERIAL_SCRIPT int
 	APP_PLAYER_SCRIPT int
+	SECRET_METHOD     int
+}
+
+type KodikRequestParams struct {
+	url          string
+	referer      string
+	origin       string
+	content_type string
+	host         string
+	page_type    int
+	seria        KodikSeriaInfo
 }
 
 func NewKodikPageType() kodikPageType {
@@ -24,21 +35,38 @@ func NewKodikPageType() kodikPageType {
 		MAIN_PAGE:         0,
 		PLAYER_PAGE:       1,
 		SERIAL_PAGE:       2,
-		APP_SERIAL_SCRIPT: 3, // Если это актуально, добавьте значения для остальных страниц
+		APP_SERIAL_SCRIPT: 3,
 		APP_PLAYER_SCRIPT: 4,
+		SECRET_METHOD:     5,
 	}
 }
 
-func GetPage(client *http.Client, url string, pageType int, params *KodikParams, forceRef string) (string, error) {
-	req, err := http.NewRequest("GET", url, nil)
+func newKodikRequestParams(url string, referer string, origin string, content_type string, host string, page_type int, seria KodikSeriaInfo) KodikRequestParams {
+	return KodikRequestParams{
+		url:          url,
+		referer:      referer,
+		origin:       origin,
+		content_type: content_type,
+		host:         host,
+		page_type:    page_type,
+		seria:        seria,
+	}
+}
+
+// Возращает параметры запроса для Kodik с нормализованными URL
+func GetKodikRequestParams(url string, referer string, origin string, content_type string, host string, page_type int, seria_info KodikSeriaInfo) KodikRequestParams {
+	return newKodikRequestParams(
+		NormalizeURL(url), NormalizeURL(referer), NormalizeURL(origin), content_type, NormalizeURL(host), page_type, seria_info)
+}
+
+func GetPage(client *http.Client, kodikParams *KodikParams, requestParams KodikRequestParams) (string, error) {
+	req, err := http.NewRequest("GET", requestParams.url, nil)
 	if err != nil {
 		return "", fmt.Errorf("error creating request: %w", err)
 	}
 
-	// Установка заголовков в зависимости от типа страницы
-	if err := setHeadersBasedOnPageType(pageType, req, params, forceRef); err != nil {
-		return "", err
-	}
+	// Установка заголовков
+	SetHeaders(req, requestParams.page_type, kodikParams, requestParams)
 
 	// Выполняем запрос
 	resp, err := client.Do(req)
@@ -56,18 +84,40 @@ func GetPage(client *http.Client, url string, pageType int, params *KodikParams,
 	return body, nil
 }
 
-func setHeadersBasedOnPageType(pageType int, req *http.Request, params *KodikParams, forceRef string) error {
-	switch pageType {
-	case KodikPage.MAIN_PAGE:
-		SetHeaders("", "", req, KodikPage.MAIN_PAGE)
-	case KodikPage.PLAYER_PAGE:
-		SetHeaders("https://"+params.MainDomain.Domain+"/", "", req, KodikPage.PLAYER_PAGE)
-	case KodikPage.APP_SERIAL_SCRIPT:
-		SetHeaders(forceRef, "", req, KodikPage.APP_SERIAL_SCRIPT)
+func PostPage(client *http.Client, kodikParams *KodikParams, requestParams KodikRequestParams) (string, error) {
+	var (
+		req *http.Request
+		err error
+	)
+
+	switch requestParams.page_type {
+	case KodikPage.SECRET_METHOD:
+		req, err = http.NewRequest("POST", requestParams.url, GetSecretMethodPayload(kodikParams, requestParams.seria))
 	default:
-		return fmt.Errorf("unknown page type: %d", pageType)
+		req, err = http.NewRequest("POST", requestParams.url, nil)
 	}
-	return nil
+
+	if err != nil {
+		return "", fmt.Errorf("error creating request: %w", err)
+	}
+
+	// Установка заголовков
+	SetHeaders(req, requestParams.page_type, kodikParams, requestParams)
+
+	// Выполняем запрос
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error making request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Обработка ответа
+	body, err := processResponseBody(resp)
+	if err != nil {
+		return "", err
+	}
+
+	return body, nil
 }
 
 func processResponseBody(resp *http.Response) (string, error) {

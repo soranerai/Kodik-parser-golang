@@ -3,7 +3,9 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -174,4 +176,58 @@ func GetSecretMethod(body string) (string, error) {
 		return "", err
 	}
 	return DecodeBase64(encoded)
+}
+
+func parseJSONToMap(jsonStr string) (map[string]interface{}, error) {
+	// Создаем переменную для хранения результата
+	var result map[string]interface{}
+
+	// Парсим JSON в map
+	err := json.Unmarshal([]byte(jsonStr), &result)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка при разборе JSON: %w", err)
+	}
+
+	return result, nil
+}
+
+func GetBestQualityURL(body string) (string, error) {
+	var (
+		bestQuality       string
+		currentQualityInt int
+		bestQualityInt    int
+	)
+
+	secretMap, _ := parseJSONToMap(body)
+
+	links, ok := secretMap["links"].(map[string]interface{})
+	if !ok {
+		return "", errors.New("failed to assert links to map[string]interface{}")
+	}
+
+	for currentQuality := range links {
+		currentQualityInt, _ = strconv.Atoi(currentQuality)
+		bestQualityInt, _ = strconv.Atoi(bestQuality)
+
+		if bestQuality == "" || currentQualityInt > bestQualityInt {
+			bestQuality = currentQuality
+		}
+	}
+
+	resolutions, ok := links[bestQuality].([]interface{})
+	if !ok {
+		return "", errors.New("failed to assert resolutions to []interface{}")
+	}
+
+	resolution, ok := resolutions[0].(map[string]interface{})
+	if !ok {
+		return "", errors.New("failed to assert resolution to map[string]interface{}")
+	}
+
+	decodedURL, err := DecodeVideoUrl(resolution["src"].(string))
+	if err != nil {
+		return "", fmt.Errorf("ошибка декодирования секретного метода: %w", err)
+	}
+
+	return NormalizeURL(decodedURL), nil
 }
