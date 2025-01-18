@@ -4,11 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+)
+
+var (
+	KodikLinkTypes = NewKodikLinkTypes()
 )
 
 // Структуры данных для параметров и видеоинформации
@@ -32,14 +38,36 @@ type KodikSerialDetails struct {
 }
 
 type KodikSeriaInfo struct {
-	sNum   string
-	sId    string
-	sHash  string
-	sTitle string
+	Num   string
+	Id    string
+	Hash  string
+	Title string
 }
 
 type KodikSeasonInfo struct {
 	Series []KodikSeriaInfo
+}
+
+type kodikLinkTypes struct {
+	Serial int
+	Movie  int
+}
+
+type Config struct {
+	OpenInMpvNet     bool
+	MpvNetExecutable string
+}
+
+type Result struct {
+	Seria KodikSeriaInfo
+	Video string
+}
+
+func NewKodikLinkTypes() kodikLinkTypes {
+	return kodikLinkTypes{
+		Serial: 0,
+		Movie:  1,
+	}
 }
 
 // извлекает информацию о сериях из тела страницы плеера
@@ -56,10 +84,10 @@ func ParseSeasonSeries(body string) (KodikSeasonInfo, error) {
 		func(i int, s *goquery.Selection) {
 			seriaInfo = KodikSeriaInfo{}
 
-			seriaInfo.sNum, _ = s.Attr("value")
-			seriaInfo.sId, _ = s.Attr("data-id")
-			seriaInfo.sHash, _ = s.Attr("data-hash")
-			seriaInfo.sTitle, _ = s.Attr("data-title")
+			seriaInfo.Num, _ = s.Attr("value")
+			seriaInfo.Id, _ = s.Attr("data-id")
+			seriaInfo.Hash, _ = s.Attr("data-hash")
+			seriaInfo.Title, _ = s.Attr("data-title")
 
 			seasonInfo.Series = append(seasonInfo.Series, seriaInfo)
 		})
@@ -230,4 +258,35 @@ func GetBestQualityURL(body string) (string, error) {
 	}
 
 	return NormalizeURL(decodedURL), nil
+}
+
+func GetLinkType(url string) int {
+	if strings.Contains(url, "serial") {
+		return KodikLinkTypes.Serial
+	} else {
+		return KodikLinkTypes.Movie
+	}
+}
+
+func GetConfigFile(filename string) (Config, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return Config{}, fmt.Errorf("ошибка открытия файла: %w", err)
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		fmt.Println("Error reading file:", err)
+		return Config{}, err
+	}
+
+	result, _ := parseJSONToMap(string(data))
+
+	config := Config{
+		OpenInMpvNet:     result["openInMpvNet"].(bool),
+		MpvNetExecutable: result["mpvNetExecutable"].(string),
+	}
+
+	return config, nil
 }

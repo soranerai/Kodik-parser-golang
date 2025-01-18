@@ -55,15 +55,15 @@ func GetSecretMethodPayload(params *KodikParams, seria KodikSeriaInfo) *bytes.Bu
 	payload.Set("pd", params.PlayerDomain.Domain)
 	payload.Set("pd_sign", params.PlayerDomain.DomainSign)
 
-	payload.Set("ref", "https://kodik.online/")
+	payload.Set("ref", NormalizeURL(params.RefererDomain.Domain)) //params.RefererDomain.Domain
 	payload.Set("ref_sign", params.RefererDomain.DomainSign)
 
 	payload.Set("bad_user", "false")
 	payload.Set("cdn_is_working", "true")
 	payload.Set("uid", "numqLn")
 	payload.Set("type", "seria")
-	payload.Set("hash", seria.sHash)
-	payload.Set("id", seria.sId)
+	payload.Set("hash", seria.Hash)
+	payload.Set("id", seria.Id)
 	payload.Set("info", "{}")
 
 	return bytes.NewBufferString(payload.Encode())
@@ -127,6 +127,7 @@ func NormalizeURL(input string) string {
 	res, err := normalizeURL(input)
 	if err != nil {
 		log.Printf("Error normalizing URL: %v", err)
+		return ""
 	}
 
 	return res
@@ -134,6 +135,11 @@ func NormalizeURL(input string) string {
 
 // нормализует URL, добавляя схему и завершающий слеш
 func normalizeURL(input string) (string, error) {
+	input, err := url.QueryUnescape(input)
+	if err != nil {
+		return "", fmt.Errorf("ошибка декодирования URL: %w", err)
+	}
+
 	if strings.HasPrefix(input, "//") {
 		input = "https:" + input
 	} else if !strings.HasPrefix(input, "http://") && !strings.HasPrefix(input, "https://") {
