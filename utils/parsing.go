@@ -54,13 +54,17 @@ type kodikLinkTypes struct {
 }
 
 type Config struct {
-	OpenInMpvNet     bool
-	MpvNetExecutable string
+	OpenInMpvNet       bool
+	MpvNetExecutable   string
+	DownloadResults    bool
+	MaxVideosDownloads int
+	MaxVideoWorkers    int
 }
 
 type Result struct {
 	Seria KodikSeriaInfo
 	Video string
+	Path  string
 }
 
 func NewKodikLinkTypes() kodikLinkTypes {
@@ -284,9 +288,33 @@ func GetConfigFile(filename string) (Config, error) {
 	result, _ := parseJSONToMap(string(data))
 
 	config := Config{
-		OpenInMpvNet:     result["openInMpvNet"].(bool),
-		MpvNetExecutable: result["mpvNetExecutable"].(string),
+		OpenInMpvNet:       result["openInMpvNet"].(bool),
+		MpvNetExecutable:   result["mpvNetExecutable"].(string),
+		DownloadResults:    result["downloadResults"].(bool),
+		MaxVideosDownloads: int(result["maxVideosDownloads"].(float64)),
+		MaxVideoWorkers:    int(result["maxVideoWorkers"].(float64)),
 	}
 
 	return config, nil
+}
+
+func SortResults(results []Result) []Result {
+	var (
+		sortedResults []Result
+		sNumFirst     int
+		sNumSecond    int
+	)
+
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			sNumFirst, _ = strconv.Atoi(results[i].Seria.Num)
+			sNumSecond, _ = strconv.Atoi(results[j].Seria.Num)
+
+			if sNumFirst > sNumSecond {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+		sortedResults = append(sortedResults, results[i])
+	}
+	return sortedResults
 }

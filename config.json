@@ -1,4 +1,7 @@
 {
     "openInMpvNet": true,
-    "mpvNetExecutable": "C:\\Program Files\\mpv.net\\mpvnet.exe"
+    "mpvNetExecutable": "C:\\Program Files\\mpv.net\\mpvnet.exe",
+    "downloadResults": true,
+    "maxVideosDownloads": 4, 
+    "maxVideoWorkers": 8
 }

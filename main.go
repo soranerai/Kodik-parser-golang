@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"kodik_parser/utils"
+	"kodik_parser/video_utils"
 	"log"
 	"net/http"
 	"strconv"
@@ -136,6 +137,8 @@ func handleSerial(url string) []utils.Result {
 		)
 	}
 
+	bar.Finish()
+
 	go func() {
 		wg.Wait()
 		close(results)
@@ -147,30 +150,9 @@ func handleSerial(url string) []utils.Result {
 	}
 
 	// Сортируем результаты
-	resultsArr = sortResults(resultsArr)
+	resultsArr = utils.SortResults(resultsArr)
 
 	return resultsArr
-}
-
-func sortResults(results []utils.Result) []utils.Result {
-	var (
-		sortedResults []utils.Result
-		sNumFirst     int
-		sNumSecond    int
-	)
-
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			sNumFirst, _ = strconv.Atoi(results[i].Seria.Num)
-			sNumSecond, _ = strconv.Atoi(results[j].Seria.Num)
-
-			if sNumFirst > sNumSecond {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-		sortedResults = append(sortedResults, results[i])
-	}
-	return sortedResults
 }
 
 func getVideoUrlWorker(params *utils.KodikParams, seria utils.KodikSeriaInfo, client *http.Client, playerPageURL string, secretMethod string, results chan<- utils.Result, wg *sync.WaitGroup, bar *progressbar.ProgressBar) {
@@ -215,6 +197,11 @@ func handle(url string, config *utils.Config) {
 	switch utils.GetLinkType(url) {
 	case utils.KodikLinkTypes.Serial:
 		results = handleSerial(url)
+	}
+
+	if config.DownloadResults {
+		fmt.Println("Загрузка видео...")
+		results = video_utils.DownloadVideos(results, config)
 	}
 
 	if config.OpenInMpvNet {

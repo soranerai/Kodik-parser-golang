@@ -11,12 +11,18 @@ func OpenInMpvNet(results []Result, config *Config) error {
 
 	commands = append(commands, "append")
 
-	for _, res := range results {
-		commands = append(commands, res.Video)
+	if config.DownloadResults {
+		for _, res := range results {
+			commands = append(commands, res.Path)
+		}
+	} else {
+		for _, res := range results {
+			commands = append(commands, res.Video)
+		}
 	}
 
 	cmd := exec.Command(config.MpvNetExecutable, commands...)
-	err := cmd.Run()
+	err := cmd.Start()
 	if err != nil {
 		log.Fatalf("Error while opening with MVP.NET!")
 		return err
