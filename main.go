@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/schollz/progressbar/v3"
 )
@@ -25,7 +26,12 @@ func handleSerial(url string) []utils.Result {
 
 	bar = progressbar.Default(5)
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			TLSHandshakeTimeout: 60 * time.Second, // Таймаут на хендшейк TLS
+		},
+	}
 	defer client.CloseIdleConnections()
 
 	// Инициализация параметров
@@ -120,7 +126,7 @@ func handleSerial(url string) []utils.Result {
 
 	fmt.Println("Получение ссылок...")
 
-	bar = progressbar.Default(int64(epRange[0] - 1 + epRange[1]))
+	bar = progressbar.Default(-1 * int64(epRange[1]-epRange[0]-1))
 
 	// Отправляем POST запросы на секретный метод горутин
 	var wg sync.WaitGroup
