@@ -162,7 +162,7 @@ func handleSerial(url string, urlType int) utils.HandleResult {
 
 	bar.Finish()
 
-	bar = progressbar.Default(-1 * int64(epRange[1]-epRange[0]-1))
+	bar = progressbar.Default(-1 * int64(epRange[0]-epRange[1]-1))
 
 	// Отправляем POST запросы на секретный метод горутин
 	var wg sync.WaitGroup
@@ -209,6 +209,7 @@ func getVideoUrlWorker(
 	urlType int) {
 
 	defer wg.Done()
+	defer bar.Add(1)
 
 	var (
 		requestParams utils.KodikRequestParams
@@ -238,7 +239,6 @@ func getVideoUrlWorker(
 	}
 
 	results <- utils.Result{Seria: seria, Video: video}
-	bar.Add(1)
 }
 
 func handle(url string, config *utils.Config) {

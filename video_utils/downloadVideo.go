@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/schollz/progressbar/v3"
@@ -70,7 +71,6 @@ func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar
 	}
 
 	totalSize := headResp.ContentLength
-
 	numChunks := int(totalSize / chunkSize)
 	if totalSize%chunkSize != 0 {
 		numChunks++
@@ -83,12 +83,21 @@ func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar
 
 	semaphore := make(chan struct{}, config.MaxVideoWorkers)
 
+	client := &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
+	defer client.CloseIdleConnections()
+
 	for i := 0; i < numChunks; i++ {
 		semaphore <- struct{}{}
 		chunkWG.Add(1)
 		go func(i int) {
 			defer chunkWG.Done()
 			defer func() { <-semaphore }()
+
 			start := int64(i) * chunkSize
 			end := start + chunkSize - 1
 			if end >= totalSize {
@@ -96,10 +105,22 @@ func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar
 			}
 
 			tempFile := fmt.Sprintf("%s\\%s_chunk_%d.tmp", path, result.Seria.Num, i)
-			if err := downloadChunk(url, start, end, tempFile, bar); err != nil {
-				log.Printf("Failed to download chunk %d: %v", i, err)
+			attempts := 3
+
+			for attempts > 0 {
+				if err := downloadChunk(client, url, start, end, tempFile, bar); err != nil {
+					if strings.Contains(err.Error(), "TLS handshake timeout") || strings.Contains(err.Error(), "status code: 504") {
+						log.Printf("Retrying chunk %d due to error: %v", i, err)
+						time.Sleep(5 * time.Second)
+						attempts--
+						continue
+					}
+					log.Printf("Failed to download chunk %d: %v", i, err)
+					return
+				}
+				tempFiles[i] = tempFile
+				break
 			}
-			tempFiles[i] = tempFile
 		}(i)
 	}
 
@@ -117,7 +138,7 @@ func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar
 	return nil
 }
 
-func downloadChunk(url string, start, end int64, tempFile string, bar *progressbar.ProgressBar) error {
+func downloadChunk(client *http.Client, url string, start, end int64, tempFile string, bar *progressbar.ProgressBar) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -126,7 +147,7 @@ func downloadChunk(url string, start, end int64, tempFile string, bar *progressb
 	rangeHeader := fmt.Sprintf("bytes=%d-%d", start, end)
 	req.Header.Set("Range", rangeHeader)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
@@ -144,7 +165,6 @@ func downloadChunk(url string, start, end int64, tempFile string, bar *progressb
 
 	progressReader := io.TeeReader(resp.Body, bar)
 
-	// Copy from the progressReader to the file
 	_, err = io.Copy(file, progressReader)
 	if err != nil {
 		return fmt.Errorf("failed to write chunk to file: %w", err)
