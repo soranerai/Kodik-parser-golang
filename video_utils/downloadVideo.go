@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/schollz/progressbar/v3"
 )
@@ -175,7 +177,7 @@ func mergeChunks(tempFiles []string, outputFile string) error {
 }
 
 func getPath(titleName string) string {
-	filePath := fmt.Sprintf("videos\\%s", titleName)
+	filePath := fmt.Sprintf("videos\\%s", normalizeDirName(titleName))
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		log.Fatalf("Ошибка при получении пути: %v", err)
@@ -189,4 +191,41 @@ func getPath(titleName string) string {
 	}
 
 	return absPath
+}
+
+func normalizeDirName(dirName string) string {
+	// Список зарезервированных имен файлов/папок в Windows
+	reservedNames := map[string]struct{}{
+		"CON": {}, "PRN": {}, "AUX": {}, "NUL": {},
+		"COM1": {}, "COM2": {}, "COM3": {}, "COM4": {}, "COM5": {}, "COM6": {}, "COM7": {},
+		"COM8": {}, "COM9": {}, "LPT1": {}, "LPT2": {}, "LPT3": {}, "LPT4": {}, "LPT5": {},
+		"LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
+	}
+
+	// Удаляем или заменяем символы, не разрешенные в Windows
+	re := regexp.MustCompile(`[<>:"/\|?*\ ]`)
+	dirName = re.ReplaceAllString(dirName, "_")
+
+	// Заменяем зарезервированные имена на "_"
+	if _, exists := reservedNames[strings.ToUpper(dirName)]; exists {
+		dirName = "_" + dirName
+	}
+
+	// Обрезаем имя, если оно слишком длинное (Windows ограничивает длину пути 255 символами)
+	if len(dirName) > 255 {
+		dirName = dirName[:255]
+	}
+
+	// Удаляем пробелы в начале и в конце строки
+	dirName = strings.TrimSpace(dirName)
+
+	// Убираем все неалфавитные символы в начале и в конце
+	dirName = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' {
+			return r
+		}
+		return -1
+	}, dirName)
+
+	return dirName
 }
