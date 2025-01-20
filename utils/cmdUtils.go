@@ -19,17 +19,17 @@ func InitLogger() error {
 	return nil
 }
 
-func OpenInMpvNet(results []Result, config *Config) error {
+func OpenInMpvNet(result HandleResult, config *Config) error {
 	var commands []string
 
 	commands = append(commands, "append")
 
 	if config.DownloadResults {
-		for _, res := range results {
+		for _, res := range result.Results {
 			commands = append(commands, res.Path)
 		}
 	} else {
-		for _, res := range results {
+		for _, res := range result.Results {
 			commands = append(commands, res.Video)
 		}
 	}
@@ -44,8 +44,8 @@ func OpenInMpvNet(results []Result, config *Config) error {
 	return nil
 }
 
-func PrintResults(results []Result) {
-	for _, res := range results {
+func PrintResults(result HandleResult) {
+	for _, res := range result.Results {
 		fmt.Printf("Серия %s: %s\n", res.Seria.Num, res.Video)
 	}
 }

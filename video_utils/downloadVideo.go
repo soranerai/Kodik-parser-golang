@@ -16,9 +16,9 @@ import (
 
 const chunkSize = 5 * 1024 * 1024 // Размер части - 5MB
 
-func DownloadVideos(results []utils.Result, config *utils.Config) []utils.Result {
+func DownloadVideos(result utils.HandleResult, config *utils.Config) utils.HandleResult {
 	var wg sync.WaitGroup
-	downloadResults := make(chan utils.Result, len(results))
+	downloadResults := make(chan utils.Result, len(result.Results))
 
 	semaphore := make(chan struct{}, config.MaxVideosDownloads)
 	defer close(semaphore)
@@ -28,13 +28,13 @@ func DownloadVideos(results []utils.Result, config *utils.Config) []utils.Result
 		"Загрузка видео...",
 	)
 
-	for _, res := range results {
+	for _, res := range result.Results {
 		semaphore <- struct{}{} // Захват семафора
 		wg.Add(1)
 		go func(res utils.Result) {
 			defer wg.Done()
 			defer func() { <-semaphore }()
-			if err := downloadVideo(res, downloadResults, bar, config); err != nil {
+			if err := downloadVideo(res, downloadResults, bar, config, result.TitleName); err != nil {
 				log.Printf("Failed to download video %s: %v", res.Seria.Num, err)
 			}
 		}(res)
@@ -50,11 +50,11 @@ func DownloadVideos(results []utils.Result, config *utils.Config) []utils.Result
 		downloadResultsArr = append(downloadResultsArr, res)
 	}
 
-	downloadResultsArr = utils.SortResults(downloadResultsArr)
-	return downloadResultsArr
+	result.Results = utils.SortResults(downloadResultsArr)
+	return result
 }
 
-func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar *progressbar.ProgressBar, config *utils.Config) error {
+func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar *progressbar.ProgressBar, config *utils.Config, titleName string) error {
 	url := strings.Replace(result.Video, ":hls:manifest.m3u8", "", -1)
 
 	headResp, err := http.Head(url)
@@ -77,7 +77,7 @@ func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar
 	tempFiles := make([]string, numChunks)
 	var chunkWG sync.WaitGroup
 
-	path := getPath()
+	path := getPath(titleName)
 
 	semaphore := make(chan struct{}, config.MaxVideoWorkers)
 
@@ -174,8 +174,9 @@ func mergeChunks(tempFiles []string, outputFile string) error {
 	return nil
 }
 
-func getPath() string {
-	absPath, err := filepath.Abs("videos")
+func getPath(titleName string) string {
+	filePath := fmt.Sprintf("videos\\%s", titleName)
+	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		log.Fatalf("Ошибка при получении пути: %v", err)
 	}

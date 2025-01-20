@@ -15,12 +15,13 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func handleSerial(url string, urlType int) []utils.Result {
+func handleSerial(url string, urlType int) utils.HandleResult {
 	var (
 		requestParams utils.KodikRequestParams
 		responseBody  string
 		err           error
 		bar           *progressbar.ProgressBar
+		handleResult  utils.HandleResult
 	)
 
 	fmt.Println("Парсинг сериала...")
@@ -32,7 +33,7 @@ func handleSerial(url string, urlType int) []utils.Result {
 	client := &http.Client{
 		Timeout: 0,
 		Transport: &http.Transport{
-			TLSHandshakeTimeout: 60 * time.Second, // Таймаут на хендшейк TLS
+			TLSHandshakeTimeout: 60 * time.Second,
 		},
 	}
 	defer client.CloseIdleConnections()
@@ -63,6 +64,12 @@ func handleSerial(url string, urlType int) []utils.Result {
 	if err != nil {
 		log.Fatalf("Error parsing iframe URL: %v", err)
 	}
+
+	titleName, err := utils.ParseTitle(responseBody)
+	if err != nil {
+		log.Fatalf("Error parsing title: %v", err)
+	}
+	handleResult.TitleName = titleName
 
 	bar.Add(1)
 
@@ -180,15 +187,14 @@ func handleSerial(url string, urlType int) []utils.Result {
 		close(results)
 	}()
 
-	var resultsArr []utils.Result
 	for Result := range results {
-		resultsArr = append(resultsArr, Result)
+		handleResult.Results = append(handleResult.Results, Result)
 	}
 
 	// Сортируем результаты
-	resultsArr = utils.SortResults(resultsArr)
+	handleResult.Results = utils.SortResults(handleResult.Results)
 
-	return resultsArr
+	return handleResult
 }
 
 func getVideoUrlWorker(
@@ -239,30 +245,29 @@ func handle(url string, config *utils.Config) {
 	log.Println("=================LETS FUCK KODIK=================")
 
 	var (
-		results []utils.Result
+		result utils.HandleResult
 	)
 
 	urlType := utils.GetLinkType(url)
 
 	switch urlType {
 	case utils.KodikLinkTypes.Serial, utils.KodikLinkTypes.Movie:
-		results = handleSerial(url, urlType)
-
+		result = handleSerial(url, urlType)
 	}
 
 	if config.DownloadResults {
 		fmt.Println("Загрузка видео...")
 		log.Print(" Video download is starting")
-		results = video_utils.DownloadVideos(results, config)
+		result = video_utils.DownloadVideos(result, config)
 		log.Print(" Video download is complete")
 	}
 
 	if config.OpenInMpvNet {
 		log.Print(" Opening in MPV")
-		utils.OpenInMpvNet(results, config)
+		utils.OpenInMpvNet(result, config)
 	} else {
 		log.Print(" Printing results")
-		utils.PrintResults(results)
+		utils.PrintResults(result)
 	}
 
 	log.Println("============KODIK SUCCESSFULLY FUCKED============")

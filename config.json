@@ -1,5 +1,5 @@
 {
-    "openInMpvNet": true,
+    "openInMpvNet": false,
     "mpvNetExecutable": "C:\\Program Files\\mpv.net\\mpvnet.exe",
     "downloadResults": true,
     "maxVideosDownloads": 4, 

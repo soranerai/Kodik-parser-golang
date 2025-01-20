@@ -63,6 +63,11 @@ type Result struct {
 	Path  string
 }
 
+type HandleResult struct {
+	Results   []Result
+	TitleName string
+}
+
 func NewKodikLinkTypes() kodikLinkTypes {
 	return kodikLinkTypes{
 		Serial: 0,
@@ -346,4 +351,17 @@ func ValidateURL(url string) bool {
 	}
 
 	return matched
+}
+
+// Парсит title из body главной страницы
+func ParseTitle(body string) (string, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+
+	title := doc.Find(".player-info .top-info .title").First().Text()
+
+	return title, nil
+
 }
