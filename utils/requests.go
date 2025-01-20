@@ -84,7 +84,7 @@ func GetPage(client *http.Client, kodikParams *KodikParams, requestParams KodikR
 	return body, nil
 }
 
-func PostPage(client *http.Client, kodikParams *KodikParams, requestParams KodikRequestParams) (string, error) {
+func PostPage(client *http.Client, kodikParams *KodikParams, requestParams KodikRequestParams, seriaType int) (string, error) {
 	var (
 		req *http.Request
 		err error
@@ -92,7 +92,7 @@ func PostPage(client *http.Client, kodikParams *KodikParams, requestParams Kodik
 
 	switch requestParams.page_type {
 	case KodikPage.SECRET_METHOD:
-		req, err = http.NewRequest("POST", requestParams.url, GetSecretMethodPayload(kodikParams, requestParams.seria))
+		req, err = http.NewRequest("POST", requestParams.url, GetSecretMethodPayload(kodikParams, requestParams.seria, seriaType))
 	default:
 		req, err = http.NewRequest("POST", requestParams.url, nil)
 	}

@@ -1,10 +1,23 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 )
+
+func InitLogger() error {
+	file, err := os.OpenFile("kodikParser.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return errors.New("ошибка при создании лога")
+	}
+
+	log.SetOutput(file)
+
+	return nil
+}
 
 func OpenInMpvNet(results []Result, config *Config) error {
 	var commands []string

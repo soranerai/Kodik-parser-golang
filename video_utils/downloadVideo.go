@@ -140,14 +140,13 @@ func downloadChunk(url string, start, end int64, tempFile string, bar *progressb
 	}
 	defer file.Close()
 
-	chunkSize := end - start + 1
-	_, err = io.Copy(io.MultiWriter(file), io.LimitReader(resp.Body, chunkSize))
+	progressReader := io.TeeReader(resp.Body, bar)
+
+	// Copy from the progressReader to the file
+	_, err = io.Copy(file, progressReader)
 	if err != nil {
 		return fmt.Errorf("failed to write chunk to file: %w", err)
 	}
-
-	//progressCh <- chunkSize
-	bar.Add64(chunkSize)
 
 	return nil
 }

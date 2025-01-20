@@ -44,10 +44,6 @@ type KodikSeriaInfo struct {
 	Title string
 }
 
-type KodikSeasonInfo struct {
-	Series []KodikSeriaInfo
-}
-
 type kodikLinkTypes struct {
 	Serial int
 	Movie  int
@@ -75,8 +71,8 @@ func NewKodikLinkTypes() kodikLinkTypes {
 }
 
 // извлекает информацию о сериях из тела страницы плеера
-func ParseSeasonSeries(body string) (KodikSeasonInfo, error) {
-	var seasonInfo KodikSeasonInfo
+func ParseSeasonSeries(body string) ([]KodikSeriaInfo, error) {
+	var seasonInfo []KodikSeriaInfo
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
@@ -93,7 +89,7 @@ func ParseSeasonSeries(body string) (KodikSeasonInfo, error) {
 			seriaInfo.Hash, _ = s.Attr("data-hash")
 			seriaInfo.Title, _ = s.Attr("data-title")
 
-			seasonInfo.Series = append(seasonInfo.Series, seriaInfo)
+			seasonInfo = append(seasonInfo, seriaInfo)
 		})
 
 	return seasonInfo, nil
@@ -153,6 +149,25 @@ func ParseSerialDetails(body string) (KodikSerialDetails, error) {
 	}
 
 	return details, nil
+}
+
+func ParseVideoInfo(body string) ([]KodikSeriaInfo, error) {
+	var videoInfo []KodikSeriaInfo
+
+	videoInfo = append(videoInfo, KodikSeriaInfo{})
+
+	var err error
+	videoInfo[0].Id, err = extractRegex(body, `videoInfo\.id = \'(\d+)\';`, "videoInfo.Id")
+	if err != nil {
+		return videoInfo, err
+	}
+
+	videoInfo[0].Hash, err = extractRegex(body, `videoInfo\.hash = \'([a-z0-9]+)\';`, "videoInfo.Hash")
+	if err != nil {
+		return videoInfo, err
+	}
+
+	return videoInfo, nil
 }
 
 // extractRegex извлекает первую группу по заданной регулярке
@@ -317,4 +332,18 @@ func SortResults(results []Result) []Result {
 		sortedResults = append(sortedResults, results[i])
 	}
 	return sortedResults
+}
+
+func ValidateURL(url string) bool {
+	// Регулярное выражение для проверки URL
+	re := `^https://kodik\.online/(movie|serial)/\d+/[a-zA-Z0-9]+$`
+
+	// Проверка соответствия регулярному выражению
+	matched, err := regexp.MatchString(re, url)
+	if err != nil {
+		fmt.Println("Ошибка при проверке регулярного выражения:", err)
+		return false
+	}
+
+	return matched
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"kodik_parser/utils"
 	"kodik_parser/video_utils"
@@ -14,7 +15,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func handleSerial(url string) []utils.Result {
+func handleSerial(url string, urlType int) []utils.Result {
 	var (
 		requestParams utils.KodikRequestParams
 		responseBody  string
@@ -23,6 +24,8 @@ func handleSerial(url string) []utils.Result {
 	)
 
 	fmt.Println("Парсинг сериала...")
+
+	log.Println(" Parsing main page")
 
 	bar = progressbar.Default(5)
 
@@ -63,6 +66,8 @@ func handleSerial(url string) []utils.Result {
 
 	bar.Add(1)
 
+	log.Println(" Parsing player page")
+
 	// Получаем страницу плеера
 	requestParams = utils.GetKodikRequestParams(
 		playerPageURL, params.MainDomain.Domain, "", "", "", utils.KodikPage.PLAYER_PAGE, utils.KodikSeriaInfo{})
@@ -74,6 +79,8 @@ func handleSerial(url string) []utils.Result {
 
 	bar.Add(1)
 
+	log.Println(" Using stealing method 1")
+
 	// Парсим параметры из страницы плеера
 	err = utils.ParseURLParameters(responseBody, &params)
 	if err != nil {
@@ -82,18 +89,37 @@ func handleSerial(url string) []utils.Result {
 
 	bar.Add(1)
 
-	// Извлекаем серии сезона
-	seasonSeries, err := utils.ParseSeasonSeries(responseBody)
-	if err != nil {
-		log.Fatalf("Error parsing seasonSeries: %v", err)
+	var series []utils.KodikSeriaInfo
+	if urlType == utils.KodikLinkTypes.Serial {
+		// Извлекаем серии сезона
+		series, err = utils.ParseSeasonSeries(responseBody)
+		if err != nil {
+			log.Fatalf("Error parsing series: %v", err)
+		}
+	} else {
+		series, err = utils.ParseVideoInfo(responseBody)
+		if err != nil {
+			log.Fatalf("Error parsing video: %v", err)
+		}
 	}
 
 	bar.Add(1)
+	bar.Finish()
 
 	// Получаем диапазон серий
-	epRange := getEpisodeRange(len(seasonSeries.Series))
+	var epRange [2]int
+	for {
+		epRange, err = getEpisodeRange(len(series))
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			break
+		}
+	}
 
 	fmt.Println("Обход защиты...")
+
+	log.Println(" Serial script manipulations...")
 
 	bar = progressbar.Default(3)
 
@@ -125,6 +151,9 @@ func handleSerial(url string) []utils.Result {
 	bar.Add(1)
 
 	fmt.Println("Получение ссылок...")
+	log.Println(" Obtaining secret data")
+
+	bar.Finish()
 
 	bar = progressbar.Default(-1 * int64(epRange[1]-epRange[0]-1))
 
@@ -135,11 +164,12 @@ func handleSerial(url string) []utils.Result {
 		wg.Add(1)
 		go getVideoUrlWorker(
 			&params,
-			seasonSeries.Series[i],
+			series[i],
 			client, playerPageURL,
 			secretMethod, results,
 			&wg,
 			bar,
+			urlType,
 		)
 	}
 
@@ -161,7 +191,17 @@ func handleSerial(url string) []utils.Result {
 	return resultsArr
 }
 
-func getVideoUrlWorker(params *utils.KodikParams, seria utils.KodikSeriaInfo, client *http.Client, playerPageURL string, secretMethod string, results chan<- utils.Result, wg *sync.WaitGroup, bar *progressbar.ProgressBar) {
+func getVideoUrlWorker(
+	params *utils.KodikParams,
+	seria utils.KodikSeriaInfo,
+	client *http.Client,
+	playerPageURL string,
+	secretMethod string,
+	results chan<- utils.Result,
+	wg *sync.WaitGroup,
+	bar *progressbar.ProgressBar,
+	urlType int) {
+
 	defer wg.Done()
 
 	var (
@@ -181,7 +221,7 @@ func getVideoUrlWorker(params *utils.KodikParams, seria utils.KodikSeriaInfo, cl
 		seria,
 	)
 
-	responseBody, err = utils.PostPage(client, params, requestParams)
+	responseBody, err = utils.PostPage(client, params, requestParams, urlType)
 	if err != nil {
 		log.Fatalf("Error getting secret method: %v", err)
 	}
@@ -196,28 +236,43 @@ func getVideoUrlWorker(params *utils.KodikParams, seria utils.KodikSeriaInfo, cl
 }
 
 func handle(url string, config *utils.Config) {
+	log.Println("=================LETS FUCK KODIK=================")
+
 	var (
 		results []utils.Result
 	)
 
-	switch utils.GetLinkType(url) {
-	case utils.KodikLinkTypes.Serial:
-		results = handleSerial(url)
+	urlType := utils.GetLinkType(url)
+
+	switch urlType {
+	case utils.KodikLinkTypes.Serial, utils.KodikLinkTypes.Movie:
+		results = handleSerial(url, urlType)
+
 	}
 
 	if config.DownloadResults {
 		fmt.Println("Загрузка видео...")
+		log.Print(" Video download is starting")
 		results = video_utils.DownloadVideos(results, config)
+		log.Print(" Video download is complete")
 	}
 
 	if config.OpenInMpvNet {
+		log.Print(" Opening in MPV")
 		utils.OpenInMpvNet(results, config)
 	} else {
+		log.Print(" Printing results")
 		utils.PrintResults(results)
 	}
+
+	log.Println("============KODIK SUCCESSFULLY FUCKED============")
 }
 
-func getEpisodeRange(epCount int) [2]int {
+func getEpisodeRange(epCount int) ([2]int, error) {
+	if epCount == 1 {
+		return [2]int{1, 1}, nil
+	}
+
 	var input string
 	var result [2]int
 
@@ -238,10 +293,10 @@ func getEpisodeRange(epCount int) [2]int {
 	}
 
 	if result[0] < 1 || result[1] < 1 || result[1] > epCount {
-		log.Fatalf("Неверный диапазон серий")
+		return [2]int{}, errors.New("неверный диапазон")
 	}
 
-	return result
+	return result, nil
 }
 
 func main() {
@@ -249,13 +304,28 @@ func main() {
 		url string
 	)
 
+	err := utils.InitLogger()
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	config, err := utils.GetConfigFile("config.json")
 	if err != nil {
 		log.Fatalf("Error getting config file: %v", err)
 	}
 
-	fmt.Print("Введите URL: ")
-	fmt.Scanln(&url)
+	for {
+		fmt.Print("Введите URL: ")
+		fmt.Scanln(&url)
+
+		if !utils.ValidateURL(url) {
+			fmt.Println("Некорретный URL!")
+			log.Println("Invalid url input")
+			continue
+		} else {
+			break
+		}
+	}
 
 	url = utils.NormalizeURL(url)
 

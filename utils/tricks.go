@@ -46,7 +46,7 @@ func SetHeaders(req *http.Request, kodikPageType int, params *KodikParams, reque
 	return nil
 }
 
-func GetSecretMethodPayload(params *KodikParams, seria KodikSeriaInfo) *bytes.Buffer {
+func GetSecretMethodPayload(params *KodikParams, seria KodikSeriaInfo, urlType int) *bytes.Buffer {
 	payload := url.Values{}
 
 	payload.Set("d", params.MainDomain.Domain)
@@ -61,7 +61,13 @@ func GetSecretMethodPayload(params *KodikParams, seria KodikSeriaInfo) *bytes.Bu
 	payload.Set("bad_user", "false")
 	payload.Set("cdn_is_working", "true")
 	payload.Set("uid", "numqLn")
-	payload.Set("type", "seria")
+
+	if urlType == KodikLinkTypes.Serial {
+		payload.Set("type", "seria")
+	} else {
+		payload.Set("type", "video")
+	}
+
 	payload.Set("hash", seria.Hash)
 	payload.Set("id", seria.Id)
 	payload.Set("info", "{}")
@@ -118,7 +124,7 @@ func ReverseString(s string) string {
 	return string(runes)
 }
 
-// Костыльная функция, использует normalizeURL для нормализации URL, но возвращает пустую строку, если входная строка пустая, и игнорирует ошибки
+// Костыльная функция, использует normalizeURL для нормализации URL, но возвращает пустую строку, если входная строка пустая
 func NormalizeURL(input string) string {
 	if input == "" {
 		return ""
@@ -126,7 +132,7 @@ func NormalizeURL(input string) string {
 
 	res, err := normalizeURL(input)
 	if err != nil {
-		log.Printf("Error normalizing URL: %v", err)
+		log.Fatal(err)
 		return ""
 	}
 
