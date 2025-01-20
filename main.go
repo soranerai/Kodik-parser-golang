@@ -257,16 +257,16 @@ func handle(url string, config *utils.Config) {
 
 	if config.DownloadResults {
 		fmt.Println("Загрузка видео...")
-		log.Print(" Video download is starting")
+		log.Println(" Video download is starting")
 		result = video_utils.DownloadVideos(result, config)
-		log.Print(" Video download is complete")
+		log.Println(" Video download is complete")
 	}
 
 	if config.OpenInMpvNet {
-		log.Print(" Opening in MPV")
+		log.Println(" Opening in MPV")
 		utils.OpenInMpvNet(result, config)
 	} else {
-		log.Print(" Printing results")
+		log.Println(" Printing results")
 		utils.PrintResults(result)
 	}
 
