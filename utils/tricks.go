@@ -3,17 +3,16 @@ package utils
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
+	"sync"
+	"unicode"
 )
-
-// type CustomHeader struct {
-// 	name  string
-// 	value string
-// }
 
 // SetHeaders устанавливает необходимые заголовки в зависимости от типа страницы.
 func SetHeaders(req *http.Request, kodikPageType int, params *KodikParams, requestParams KodikRequestParams) error {
@@ -75,46 +74,6 @@ func GetSecretMethodPayload(params *KodikParams, seria KodikSeriaInfo, urlType i
 	return bytes.NewBufferString(payload.Encode())
 }
 
-// rot13 выполняет преобразование строки с использованием алгоритма ROT13.
-func rot13(input string) string {
-	var result strings.Builder
-	for _, char := range input {
-		switch {
-		case 'A' <= char && char <= 'Z':
-			result.WriteRune('A' + (char-'A'+13)%26)
-		case 'a' <= char && char <= 'z':
-			result.WriteRune('a' + (char-'a'+13)%26)
-		default:
-			result.WriteRune(char)
-		}
-	}
-	return result.String()
-}
-
-// декодирует строку, закодированную в base64.
-func DecodeBase64(encoded string) (string, error) {
-	if encoded[0] == '=' {
-		encoded = ReverseString(encoded)
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", fmt.Errorf("error while decoding base64: %w", err)
-	}
-	return string(decoded), nil
-}
-
-// выполняет декодирование секрета методом ROT13, а затем base64.
-func DecodeVideoUrl(secretMethod string) (string, error) {
-	rot13Src := rot13(secretMethod)
-	decoded, err := DecodeBase64(rot13Src)
-	if err != nil {
-		return "", fmt.Errorf("error decoding secret method: %w", err)
-	}
-
-	return decoded, nil
-}
-
 // переворачивает строку
 func ReverseString(s string) string {
 	runes := []rune(s)
@@ -141,6 +100,8 @@ func NormalizeURL(input string) string {
 
 // нормализует URL, добавляя схему и завершающий слеш
 func normalizeURL(input string) (string, error) {
+	log.Printf(" Normalizing URL: %s", input)
+
 	input, err := url.QueryUnescape(input)
 	if err != nil {
 		return "", fmt.Errorf("ошибка декодирования URL: %w", err)
@@ -170,4 +131,200 @@ func normalizeURL(input string) (string, error) {
 
 	// Возвращаем нормализованный URL
 	return parsedURL.String(), nil
+}
+
+// Проверка, что строка состоит только из допустимых Base64-символов.
+func isValidBase64Format(s string) bool {
+	// Base64 допускает A-Za-z0-9+/, а также может заканчиваться на = или ==
+	base64Regex := regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+	return base64Regex.MatchString(s)
+}
+
+// decodeROT применяет обратную ротацию для букв латинского алфавита с указанным сдвигом.
+func decodeROT(s string, shift int) string {
+	shift = shift % 26
+	var result strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			newRune := r - rune(shift)
+			if newRune < 'A' {
+				newRune += 26
+			}
+			result.WriteRune(newRune)
+		case r >= 'a' && r <= 'z':
+			newRune := r - rune(shift)
+			if newRune < 'a' {
+				newRune += 26
+			}
+			result.WriteRune(newRune)
+		default:
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
+// base64Decode пытается декодировать строку как Base64.
+func base64Decode(s string) (string, error) {
+	decodedBytes, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	return string(decodedBytes), nil
+}
+
+// Вычисляет «оценку» расшифрованной строки.
+// Оценка методом эвристики. Может меняться по необходимости
+func scoreCandidate(decoded string) int {
+	score := 0
+
+	// строка без запретных символов - самый ценный параметр
+	if isCleanString(decoded) {
+		score += 50
+	}
+	// нужный нам домен
+	if strings.Contains(decoded, "kodik-storage.com") {
+		score += 20
+	}
+	if strings.Contains(decoded, "://") {
+		score += 20
+	}
+	if strings.HasPrefix(decoded, "//") {
+		score += 10
+	}
+	if strings.Contains(decoded, ".mp4") {
+		score += 5
+	}
+	if strings.Contains(decoded, ".m3u8") {
+		score += 5
+	}
+	return score
+}
+
+// проверяет, что строка не содержит запрещенных в URL символов
+func isCleanString(s string) bool {
+	allowedSymbols := ":/.?&=%-_#[]"
+	for _, r := range s {
+		if !unicode.IsPrint(r) && !strings.ContainsRune(allowedSymbols, r) {
+			return false
+		}
+		if r == '\ufffd' {
+			return false
+		}
+	}
+	return true
+}
+
+// Реверс строки
+func reverseString(s string) string {
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
+}
+
+// пытается расшифровать строку путем перебора всех вариантов, что я видел у Kodik
+func AutoDecode(input string) (string, error) {
+	log.Printf("Decoding string: %s", input)
+	type decodingResult struct {
+		decoded string
+		score   int
+	}
+
+	var channel = make(chan decodingResult, 3)
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Пробуем вариант base64
+	go func() {
+		if isValidBase64Format(input) {
+			candidate, err := base64Decode(input)
+			score := scoreCandidate(candidate)
+			if err == nil && score > 1 {
+				channel <- decodingResult{
+					decoded: candidate,
+					score:   score,
+				}
+			}
+		}
+		wg.Done()
+	}()
+
+	// Пробуем вариант reversed base64
+	go func() {
+		reversed := reverseString(input)
+		if isValidBase64Format(reversed) {
+			candidate, err := base64Decode(reversed)
+			score := scoreCandidate(candidate)
+			if err == nil && score > 1 {
+				channel <- decodingResult{
+					decoded: candidate,
+					score:   score,
+				}
+			}
+		}
+		wg.Done()
+	}()
+
+	// Пробуем вариант ROT + base64
+	go func() {
+		bestScore := -1
+		var bestDecoded string
+
+		for shift := range 26 {
+			candidate := decodeROT(input, shift)
+			if !isValidBase64Format(candidate) {
+				continue
+			}
+
+			decoded, err := base64Decode(candidate)
+			if err != nil {
+				continue
+			}
+
+			score := scoreCandidate(decoded)
+			if score > bestScore {
+				bestScore = score
+				bestDecoded = decoded
+			}
+		}
+
+		if bestScore > 1 {
+			channel <- decodingResult{
+				decoded: bestDecoded,
+				score:   bestScore,
+			}
+		}
+
+		wg.Done()
+	}()
+
+	go func() {
+		wg.Wait()
+		close(channel)
+	}()
+
+	var decodingResults []decodingResult
+	for result := range channel {
+		decodingResults = append(decodingResults, result)
+	}
+
+	if len(decodingResults) > 0 {
+		var bestDecodedString string
+		bestScore := -1
+
+		for i := range decodingResults {
+			if bestScore < decodingResults[i].score {
+				bestDecodedString = decodingResults[i].decoded
+				bestScore = decodingResults[i].score
+			}
+		}
+
+		log.Printf("Decoding result: %s", bestDecodedString)
+		return bestDecodedString, nil
+	}
+
+	return "", errors.New("decoding failure")
 }

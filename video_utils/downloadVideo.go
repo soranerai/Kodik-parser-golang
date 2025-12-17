@@ -21,7 +21,6 @@ const chunkSize = 5 * 1024 * 1024 // Размер части - 5MB
 
 func DownloadVideos(result utils.HandleResult, config *utils.Config) utils.HandleResult {
 	var wg sync.WaitGroup
-	downloadResults := make(chan utils.Result, len(result.Results))
 
 	semaphore := make(chan struct{}, config.MaxVideosDownloads)
 	defer close(semaphore)
@@ -34,40 +33,33 @@ func DownloadVideos(result utils.HandleResult, config *utils.Config) utils.Handl
 	for _, res := range result.Results {
 		semaphore <- struct{}{} // Захват семафора
 		wg.Add(1)
-		go func(res utils.Result) {
+		go func() {
 			defer wg.Done()
 			defer func() { <-semaphore }()
-			if err := downloadVideo(res, downloadResults, bar, config, result.TitleName); err != nil {
+			if path, err := downloadVideo(res, bar, config, result.TitleName); err != nil {
 				log.Printf("Failed to download video %s: %v", res.Seria.Num, err)
+			} else {
+				res.Path = path
 			}
-		}(res)
+		}()
 	}
 
-	go func() {
-		wg.Wait()
-		close(downloadResults)
-	}()
+	wg.Wait()
 
-	var downloadResultsArr []utils.Result
-	for res := range downloadResults {
-		downloadResultsArr = append(downloadResultsArr, res)
-	}
-
-	result.Results = utils.SortResults(downloadResultsArr)
 	return result
 }
 
-func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar *progressbar.ProgressBar, config *utils.Config, titleName string) error {
+func downloadVideo(result utils.Result, bar *progressbar.ProgressBar, config *utils.Config, titleName string) (string, error) {
 	url := strings.Replace(result.Video, ":hls:manifest.m3u8", "", -1)
 
 	headResp, err := http.Head(url)
 	if err != nil {
-		return fmt.Errorf("failed to send HEAD request: %w", err)
+		return "", fmt.Errorf("failed to send HEAD request: %w", err)
 	}
 	defer headResp.Body.Close()
 
 	if headResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to fetch video: status code %d", headResp.StatusCode)
+		return "", fmt.Errorf("failed to fetch video: status code %d", headResp.StatusCode)
 	}
 
 	totalSize := headResp.ContentLength
@@ -128,14 +120,10 @@ func downloadVideo(result utils.Result, downloadResults chan<- utils.Result, bar
 
 	outputFile := fmt.Sprintf("%s\\%s_серия.mp4", path, result.Seria.Num)
 	if err := mergeChunks(tempFiles, outputFile); err != nil {
-		return fmt.Errorf("failed to merge chunks: %w", err)
+		return "", fmt.Errorf("failed to merge chunks: %w", err)
 	}
 
-	downloadResults <- utils.Result{
-		Seria: result.Seria,
-		Path:  outputFile,
-	}
-	return nil
+	return outputFile, nil
 }
 
 func downloadChunk(client *http.Client, url string, start, end int64, tempFile string, bar *progressbar.ProgressBar) error {

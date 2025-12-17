@@ -15,6 +15,10 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+var (
+	debug bool = false
+)
+
 func handleSerial(url string, urlType int) utils.HandleResult {
 	var (
 		requestParams utils.KodikRequestParams
@@ -149,11 +153,18 @@ func handleSerial(url string, urlType int) utils.HandleResult {
 
 	bar.Add(1)
 
-	// Извлекаем расшифрованный секретный метод
+	// Извлекаем зашифрованный секретный метод
 	secretMethod, err := utils.GetSecretMethod(responseBody)
+	if err != nil {
+		log.Fatalf("Error extracting secret method: %v", err)
+	}
+
+	secretMethod, err = utils.AutoDecode(secretMethod)
 	if err != nil {
 		log.Fatalf("Error decoding secret method: %v", err)
 	}
+
+	log.Printf(" Decoded secret method: %s", secretMethod)
 
 	bar.Add(1)
 
@@ -258,7 +269,13 @@ func handle(url string, config *utils.Config) {
 	if config.DownloadResults {
 		fmt.Println("Загрузка видео...")
 		log.Println(" Video download is starting")
-		result = video_utils.DownloadVideos(result, config)
+
+		if config.DownloaderVersion == 1 {
+			result = video_utils.DownloadVideos(result, config)
+		} else if config.DownloaderVersion == 2 {
+			result = video_utils.DownloadVideosHLS(result, config)
+		}
+
 		log.Println(" Video download is complete")
 	}
 
@@ -274,7 +291,7 @@ func handle(url string, config *utils.Config) {
 }
 
 func getEpisodeRange(epCount int) ([2]int, error) {
-	if epCount == 1 {
+	if epCount == 1 || debug {
 		return [2]int{1, 1}, nil
 	}
 
@@ -309,6 +326,10 @@ func main() {
 		url string
 	)
 
+	if debug {
+		url = "INSERT YOUR PRIVATE KODIK URL HERE"
+	}
+
 	err := utils.InitLogger()
 	if err != nil {
 		fmt.Println(err)
@@ -320,8 +341,10 @@ func main() {
 	}
 
 	for {
-		fmt.Print("Введите URL: ")
-		fmt.Scanln(&url)
+		if !debug {
+			fmt.Print("Введите URL: ")
+			fmt.Scanln(&url)
+		}
 
 		if !utils.ValidateURL(url) {
 			fmt.Println("Некорретный URL!")

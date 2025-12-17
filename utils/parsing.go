@@ -55,6 +55,7 @@ type Config struct {
 	DownloadResults    bool
 	MaxVideosDownloads int
 	MaxVideoWorkers    int
+	DownloaderVersion  int
 }
 
 type Result struct {
@@ -221,13 +222,27 @@ func GetSerialScriptURL(body, playerDomain string) (string, error) {
 	return "https://" + playerDomain + path, nil
 }
 
-// GetSecretMethod извлекает и декодирует секретный метод
+// GetSecretMethod извлекает секретный метод
 func GetSecretMethod(body string) (string, error) {
 	encoded, err := extractRegex(body, `atob\("([^"]+)"\)`, "SecretMethod")
 	if err != nil {
 		return "", err
 	}
-	return DecodeBase64(encoded)
+	return encoded, nil
+}
+
+func GetRot13Offset(body string) (int, error) {
+	offsetStr, err := extractRegex(body, `\([a-zA-Z]+=[a-zA-Z]+\.charCodeAt\(0\)\+([0-9]+)\)`, "RotOffset")
+	if err != nil {
+		return 0, err
+	}
+
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil {
+		return 0, fmt.Errorf("ошибка преобразования rot_offset: %w", err)
+	}
+
+	return offset, nil
 }
 
 func parseJSONToMap(jsonStr string) (map[string]interface{}, error) {
@@ -252,7 +267,7 @@ func GetBestQualityURL(body string) (string, error) {
 
 	secretMap, _ := parseJSONToMap(body)
 
-	links, ok := secretMap["links"].(map[string]interface{})
+	links, ok := secretMap["links"].(map[string]any)
 	if !ok {
 		return "", errors.New("failed to assert links to map[string]interface{}")
 	}
@@ -266,19 +281,19 @@ func GetBestQualityURL(body string) (string, error) {
 		}
 	}
 
-	resolutions, ok := links[bestQuality].([]interface{})
+	resolutions, ok := links[bestQuality].([]any)
 	if !ok {
 		return "", errors.New("failed to assert resolutions to []interface{}")
 	}
 
-	resolution, ok := resolutions[0].(map[string]interface{})
+	resolution, ok := resolutions[0].(map[string]any)
 	if !ok {
 		return "", errors.New("failed to assert resolution to map[string]interface{}")
 	}
 
-	decodedURL, err := DecodeVideoUrl(resolution["src"].(string))
+	decodedURL, err := AutoDecode(resolution["src"].(string))
 	if err != nil {
-		return "", fmt.Errorf("ошибка декодирования секретного метода: %w", err)
+		return "", err
 	}
 
 	return NormalizeURL(decodedURL), nil
@@ -313,6 +328,7 @@ func GetConfigFile(filename string) (Config, error) {
 		DownloadResults:    result["downloadResults"].(bool),
 		MaxVideosDownloads: int(result["maxVideosDownloads"].(float64)),
 		MaxVideoWorkers:    int(result["maxVideoWorkers"].(float64)),
+		DownloaderVersion:  int(result["downloaderVersion"].(float64)),
 	}
 
 	return config, nil
