@@ -273,9 +273,6 @@ func downloadVideoHls(result utils.Result, bar *progressbar.ProgressBar, config 
 				if !ok {
 					return
 				}
-
-			default:
-
 			}
 		}
 	}()
